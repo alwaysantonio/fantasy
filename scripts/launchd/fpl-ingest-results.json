@@ -1,0 +1,20 @@
+{
+  "Label": "com.antonio.fpl-ingest-results",
+  "ProgramArguments": [
+    "/usr/bin/make",
+    "ingest-results",
+    "strength-current",
+    "xp",
+    "xp-actuals"
+  ],
+  "WorkingDirectory": "/Users/antonio/personal/fantasy-26",
+  "EnvironmentVariables": {
+    "PATH": "/Users/antonio/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+  },
+  "StartCalendarInterval": {
+    "Hour": 9,
+    "Minute": 0
+  },
+  "StandardOutPath": "/Users/antonio/personal/fantasy-26/logs/fpl-ingest-results.log",
+  "StandardErrorPath": "/Users/antonio/personal/fantasy-26/logs/fpl-ingest-results.log"
+}
