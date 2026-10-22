@@ -64,6 +64,7 @@ class Config:
     decay: float = 0.85
     bench_weight: float = 0.1  # value of a bench point (autosubs, injuries)
     max_hits: int = 0  # per week
+    transfers: int | None = None  # force exactly this many transfers this week
     # Friction per planned transfer after the first week. Predictions are
     # noisy, and without this the solver will swap equal-value players back
     # and forth just because a banked transfer is free.
@@ -216,6 +217,12 @@ def solve(state: dict, cfg: Config) -> dict:
     buy = B("buy", (P, T), cat="Binary")
     sell = B("sell", (P, T), cat="Binary")
     hits = B("hits", T, lowBound=0, upBound=cfg.max_hits, cat="Integer")
+    if cfg.transfers is not None:
+        if cfg.wildcard:
+            raise SystemExit("--transfers doesn't apply to a wildcard week")
+        # forcing N transfers may need more hits than max_hits allows
+        hits[0].upBound = max(cfg.max_hits, cfg.transfers - state["free_transfers"])
+        m += pulp.lpSum(buy[p][0] for p in P) == cfg.transfers
 
     obj = []
     for t in T:
@@ -403,11 +410,20 @@ def main() -> None:
     parser.add_argument("--wildcard", action="store_true")
     parser.add_argument("--horizon", type=int, default=5)
     parser.add_argument("--decay", type=float, default=0.85)
-    parser.add_argument("--max-hits", type=int, default=0)
+    parser.add_argument("--max-hits", type=int, default=0,
+                        help="hits allowed per week; taken only if worth more than 4 points")
+    parser.add_argument("--transfers", type=int, default=None,
+                        help="make exactly this many transfers this week, hits included")
     parser.add_argument("--no-save", action="store_true")
     args = parser.parse_args()
 
-    cfg = Config(wildcard=args.wildcard, horizon=args.horizon, decay=args.decay, max_hits=args.max_hits)
+    cfg = Config(
+        wildcard=args.wildcard,
+        horizon=args.horizon,
+        decay=args.decay,
+        max_hits=args.max_hits,
+        transfers=args.transfers,
+    )
     state = load_state()
     logger.info("entry %d after GW%d: bank £%.1fm, %d free transfer(s)",
                 state["fpl_entry_id"], state["last_gw"], state["bank"] / 10, state["free_transfers"])

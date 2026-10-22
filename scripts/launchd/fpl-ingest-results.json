@@ -2,6 +2,8 @@
   "Label": "com.antonio.fpl-ingest-results",
   "ProgramArguments": [
     "/usr/bin/make",
+    "-k",
+    "wait-network",
     "ingest-results",
     "strength-current",
     "xp",
@@ -9,7 +11,7 @@
   ],
   "WorkingDirectory": "/Users/antonio/personal/fantasy-26",
   "EnvironmentVariables": {
-    "PATH": "/Users/antonio/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+    "PATH": "/Users/antonio/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
   },
   "StartCalendarInterval": {
     "Hour": 9,

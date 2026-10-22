@@ -1,0 +1,59 @@
+# Daily data + predictions. Replaces the local launchd jobs.
+#
+# Missed snapshot days can't be recovered, so later steps still run when an
+# earlier one fails, and the run is marked failed (GitHub emails you).
+name: daily
+
+on:
+  schedule:
+    # 07:00 UTC = 08:00 UK summer time, 07:00 winter. GitHub may start
+    # scheduled runs a few minutes late under load.
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: fpl-database
+  cancel-in-progress: false
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ENTRY_ID: ${{ secrets.ENTRY_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --frozen
+
+      - name: Snapshot (prices, injury flags, ownership) and your squad
+        run: make ingest-daily ingest-squad
+
+      - name: Match results
+        if: ${{ !cancelled() }}
+        run: make ingest-results
+
+      - name: Team strength and expected points
+        if: ${{ !cancelled() }}
+        run: make strength-current xp xp-actuals
+
+      - name: Prune superseded model runs
+        if: ${{ !cancelled() }}
+        run: make prune
+
+      - name: Today's advice (shown on the run's summary page)
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail  # so an optimiser crash fails the step despite grep
+          {
+            echo "## Squad advice — $(date -u +%A\ %d\ %B)"
+            echo '```text'
+            uv run python -m fantasy_26.optimise.squad --no-save 2>&1 | grep -v '^INFO'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
