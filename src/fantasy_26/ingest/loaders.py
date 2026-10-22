@@ -431,13 +431,16 @@ def derive_price_changes(session: Session, season: Season) -> int:
 # --------------------------------------------------------------------------
 
 
-def load_player_history(
+def load_player_histories(
     session: Session,
     season: Season,
-    element_id: int,
-    history: list[dict],
+    histories: dict[int, list[dict]],
 ) -> int:
-    """Per-fixture results from element-summary/{id}/.
+    """Per-fixture results from element-summary/{id}/, for many players at once.
+
+    `histories` maps element id to that player's `history` list. Lookups are
+    fetched once and rows are written in a few large batches: against a remote
+    database (Neon) the round trips, not the rows, are what cost time.
 
     Keyed on fixture, so double gameweeks produce two rows naturally.
 
@@ -446,15 +449,13 @@ def load_player_history(
     properties on the model recompute it from components either way, so prefer
     those for modelling.
     """
-    ps_id = session.scalar(
-        select(PlayerSeason.id).where(
-            PlayerSeason.season_id == season.id,
-            PlayerSeason.element_id == element_id,
-        )
+    ps_map = dict(
+        session.execute(
+            select(PlayerSeason.element_id, PlayerSeason.id).where(
+                PlayerSeason.season_id == season.id
+            )
+        ).all()
     )
-    if ps_id is None:
-        return 0
-
     fx_map = dict(
         session.execute(
             select(Fixture.fpl_fixture_id, Fixture.id).where(
@@ -475,6 +476,24 @@ def load_player_history(
         ).all()
     )
 
+    rows = []
+    for element_id, history in histories.items():
+        ps_id = ps_map.get(element_id)
+        if ps_id is None:
+            continue
+        rows.extend(_history_rows(ps_id, history, fx_map, gw_map, ts_map))
+
+    # ~36 columns per row; 1,000 rows stays well under Postgres's 65,535
+    # bind-parameter limit per statement.
+    written = 0
+    for i in range(0, len(rows), 1000):
+        written += _upsert(
+            session, PlayerFixtureStat, rows[i : i + 1000], ["player_season_id", "fixture_id"]
+        )
+    return written
+
+
+def _history_rows(ps_id, history, fx_map, gw_map, ts_map) -> list[dict]:
     rows = []
     for h in history:
         fixture_id = fx_map.get(h["fixture"])
@@ -523,8 +542,7 @@ def load_player_history(
                 "transfers_out": _i(h.get("transfers_out")),
             }
         )
-
-    return _upsert(session, PlayerFixtureStat, rows, ["player_season_id", "fixture_id"])
+    return rows
 
 
 # --------------------------------------------------------------------------
