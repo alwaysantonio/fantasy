@@ -124,13 +124,13 @@ async def run_results(gameweek: int | None = None) -> None:
 
     with SessionLocal() as session, L.job_log(session, "results") as log:
         season = session.get(Season, season_id)
-        total = 0
+        histories = {}
         for result in summaries:
-            element_id = int(result.params)
             history = result.payload.get("history", [])
             if gameweek is not None:
                 history = [h for h in history if h["round"] == gameweek]
-            total += L.load_player_history(session, season, element_id, history)
+            histories[int(result.params)] = history
+        total = L.load_player_histories(session, season, histories)
 
         logger.info("stat rows: %d", total)
         log.rows_written = total
