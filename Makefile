@@ -250,12 +250,12 @@ neon-copy:  ## One-off: copy the local Docker DB into an empty Neon DB (NEON_DAT
 	./scripts/copy_to_neon.sh
 
 .PHONY: wait-network
-wait-network:  ## Block until the FPL API is reachable (up to 60 min) — the Mac may have just woken
+wait-network:  ## Block until the FPL API is reachable (up to 10 min) — the Mac may have just woken
 	@for i in $$(seq 1 60); do \
 		curl -s -o /dev/null --max-time 5 https://fantasy.premierleague.com/api/ && exit 0; \
-		sleep 60; \
+		sleep 10; \
 	done; \
-	echo "FPL API unreachable after 60 minutes"; exit 1
+	echo "FPL API unreachable after 10 minutes"; exit 1
 
 .PHONY: schedule
 schedule:  ## Generate plists from JSON and load them into launchd
