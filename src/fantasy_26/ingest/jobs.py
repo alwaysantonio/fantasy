@@ -136,6 +136,15 @@ async def run_results(gameweek: int | None = None) -> None:
         log.rows_written = total
         session.commit()
 
+        # element_summaries swallows per-player failures so one bad request
+        # doesn't sink the run. Keep what loaded, but don't call it a success.
+        missing = len(element_ids) - len(summaries)
+        if missing:
+            raise RuntimeError(
+                f"{missing} of {len(element_ids)} players failed to download; "
+                "the rest were saved — rerun `make ingest-results`"
+            )
+
 
 async def run_squad() -> None:
     """Fetch your squad for the most recent COMPLETED gameweek.

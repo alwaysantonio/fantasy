@@ -1,0 +1,68 @@
+# Weekly decision, run by hand from the Actions tab ("Run workflow") on
+# deadline day. The answer appears on the run's summary page and is saved
+# to optimisation_runs.
+name: weekly
+
+on:
+  workflow_dispatch:
+    inputs:
+      wildcard:
+        description: "Play a wildcard this week"
+        type: boolean
+        default: false
+      hits:
+        description: "Hits allowed per week (taken only if worth more than 4 points)"
+        type: choice
+        options: ["0", "1", "2"]
+        default: "0"
+      transfers:
+        description: "Force exactly this many transfers this week"
+        type: choice
+        options: ["auto", "1", "2", "3", "4", "5"]
+        default: "auto"
+
+concurrency:
+  group: fpl-database
+  cancel-in-progress: false
+
+jobs:
+  weekly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ENTRY_ID: ${{ secrets.ENTRY_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --frozen
+
+      - name: Reload your squad and refresh expected points
+        run: make ingest-squad xp
+
+      - name: Solve
+        env:
+          WILDCARD: ${{ inputs.wildcard }}
+          HITS: ${{ inputs.hits }}
+          TRANSFERS: ${{ inputs.transfers }}
+        run: |
+          set -o pipefail  # so an optimiser crash fails the step despite grep
+          args=()
+          if [ "$WILDCARD" = "true" ]; then
+            args+=(--wildcard)
+          else
+            args+=(--max-hits "$HITS")
+            [ "$TRANSFERS" != "auto" ] && args+=(--transfers "$TRANSFERS")
+          fi
+          {
+            echo "## GW decision (${args[*]})"
+            echo '```text'
+            uv run python -m fantasy_26.optimise.squad "${args[@]}" 2>&1 | grep -v '^INFO'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$GITHUB_STEP_SUMMARY"

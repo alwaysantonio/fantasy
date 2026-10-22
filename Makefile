@@ -201,15 +201,16 @@ xp-actuals:  ## Fill actual_points on predictions for finished gameweeks
 	$(UV) python -m $(PKG).predict.aggregate actuals
 
 .PHONY: optimise
-optimise:  ## Squad optimiser: best XI, captain and transfers over the next 6 GWs
-	$(UV) python -m $(PKG).optimise.squad
+optimise:  ## Squad optimiser. Optional: HITS=1 (allow hits), TRANSFERS=2 (force exactly 2)
+	$(UV) python -m $(PKG).optimise.squad \
+		$(if $(HITS),--max-hits $(HITS),) $(if $(TRANSFERS),--transfers $(TRANSFERS),)
 
 .PHONY: wildcard
 wildcard:  ## Squad optimiser with a wildcard this gameweek
 	$(UV) python -m $(PKG).optimise.squad --wildcard
 
 .PHONY: weekly
-weekly: ingest-squad xp optimise  ## Weekly decision: reload your squad, refresh xP, solve
+weekly: ingest-squad xp optimise  ## Weekly decision: reload squad, refresh xP, solve (takes HITS=, TRANSFERS=)
 
 .PHONY: strength-current
 strength-current:  ## Team strength: refresh projections for the current season only (daily job)
@@ -239,6 +240,22 @@ clean:  ## Remove caches
 
 LAUNCH_DIR := $(HOME)/Library/LaunchAgents
 JOBS       := fpl-ingest-daily fpl-ingest-results
+
+.PHONY: prune
+prune:  ## Delete superseded daily model runs (keeps latest + last-before-each-deadline)
+	$(UV) python -m $(PKG).prune
+
+.PHONY: neon-copy
+neon-copy:  ## One-off: copy the local Docker DB into an empty Neon DB (NEON_DATABASE_URL in .env)
+	./scripts/copy_to_neon.sh
+
+.PHONY: wait-network
+wait-network:  ## Block until the FPL API is reachable (up to 60 min) — the Mac may have just woken
+	@for i in $$(seq 1 60); do \
+		curl -s -o /dev/null --max-time 5 https://fantasy.premierleague.com/api/ && exit 0; \
+		sleep 60; \
+	done; \
+	echo "FPL API unreachable after 60 minutes"; exit 1
 
 .PHONY: schedule
 schedule:  ## Generate plists from JSON and load them into launchd
