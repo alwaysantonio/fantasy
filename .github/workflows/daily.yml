@@ -6,9 +6,13 @@ name: daily
 
 on:
   schedule:
-    # 07:00 UTC = 08:00 UK summer time, 07:00 winter. GitHub may start
-    # scheduled runs a few minutes late under load.
-    - cron: "0 7 * * *"
+    # GitHub runs schedules on a best-effort basis: runs on the hour are often
+    # delayed and sometimes dropped (2026-10-23's 07:00 run never started). So
+    # avoid :00, and add a backup. The snapshot step skips itself if one was
+    # taken in the last 6 hours, so the backup only snapshots when the first
+    # run didn't happen; results and predictions just refresh.
+    - cron: "17 6 * * *"   # 07:17 UK summer time, 06:17 winter
+    - cron: "47 9 * * *"   # backup: 10:47 / 09:47, still before an 11:00 deadline
   workflow_dispatch:
 
 concurrency:

@@ -67,7 +67,7 @@ make xp && make wildcard
 Once the project is pushed and the secrets are set (see below), you don't need
 your Mac at all:
 
-- **Every morning (07:00 UTC):** the **daily** workflow runs everything below,
+- **Every morning (06:17 UTC, with a backup at 09:47 UTC):** the **daily** workflow runs everything below,
   then writes the optimiser's advice for today to the run's summary page.
   Open the Actions tab and click the latest *daily* run to read it.
 - **On deadline day:** Actions tab, then **weekly**, then **Run workflow**.
