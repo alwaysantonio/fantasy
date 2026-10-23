@@ -13,15 +13,15 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from fantasy_26.config import settings
 from fantasy_26.db import SessionLocal
 from fantasy_26.ingest.client import FPLClient
 from fantasy_26.ingest import loaders as L
-from fantasy_26.models.schema import Gameweek, PlayerSeason, Season
+from fantasy_26.models.schema import Gameweek, PlayerSeason, PlayerSnapshot, Season
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)-7s %(name)s: %(message)s"
@@ -66,14 +66,31 @@ async def run_bootstrap() -> None:
         session.commit()
 
 
-async def run_snapshot() -> None:
+# A retry within this window (e.g. the backup cron after a run that did fire)
+# is skipped rather than writing a duplicate snapshot.
+MIN_SNAPSHOT_GAP = timedelta(hours=6)
+
+
+async def run_snapshot(force: bool = False) -> None:
     """Daily append-only capture of price, ownership, availability and news.
 
     Run this at least once a day. Twice is better — once around 02:00 UTC to
     catch overnight price changes, once shortly before the deadline to catch
     late team news. Missing days leaves gaps you cannot backfill.
+
+    Skips if a snapshot was captured in the last MIN_SNAPSHOT_GAP, unless
+    `force`, so the scheduler can safely retry.
     """
     captured_at = datetime.now(timezone.utc)
+
+    with SessionLocal() as session:
+        last = session.scalar(select(func.max(PlayerSnapshot.captured_at)))
+    if last is not None and captured_at - last < MIN_SNAPSHOT_GAP and not force:
+        logger.info(
+            "snapshot skipped: last one was %s ago (use --force to take another)",
+            str(captured_at - last).split(".")[0],
+        )
+        return
 
     async with FPLClient(settings.fpl_base_url) as client:
         boot = await client.bootstrap_static()
@@ -203,12 +220,15 @@ def main() -> None:
         choices=["bootstrap", "snapshot", "results", "squad", "daily"],
     )
     parser.add_argument("--gameweek", type=int, default=None)
+    parser.add_argument(
+        "--force", action="store_true", help="snapshot even if one was taken recently"
+    )
     args = parser.parse_args()
 
     if args.job == "bootstrap":
         asyncio.run(run_bootstrap())
     elif args.job == "snapshot":
-        asyncio.run(run_snapshot())
+        asyncio.run(run_snapshot(args.force))
     elif args.job == "results":
         asyncio.run(run_results(args.gameweek))
     elif args.job == "squad":
@@ -217,7 +237,7 @@ def main() -> None:
 
         async def _daily() -> None:
             await run_bootstrap()
-            await run_snapshot()
+            await run_snapshot(args.force)
 
         asyncio.run(_daily())
 
