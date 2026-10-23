@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -69,6 +70,63 @@ VERSION = "0.2"
 # Managers score on an entirely different basis; they are not footballers.
 EXCLUDED_POSITIONS = (5,)
 
+# FPL's injury flags, applied on top of the booster. The booster can't learn
+# them: past seasons have no flag history (FPL doesn't publish it), so it never
+# saw a flagged player and gave chance_next zero importance. Until a season of
+# our own snapshots exists to train on, scale P(plays) by FPL's own figure.
+#
+# Without a return date, the unavailable share shrinks by this factor for each
+# week past the first gameweek after the snapshot. UNAVAILABLE (left the club,
+# loaned out) is absent, so it never recovers.
+RECOVERY_PER_WEEK = {"DOUBTFUL": 0.5, "INJURED": 0.75, "SUSPENDED": 0.75}
+_RETURN_DATE = re.compile(r"(?:Expected back|Suspended until) (\d{1,2} [A-Z][a-z]{2})")
+
+
+def _return_date(news: str, captured_at: pd.Timestamp) -> pd.Timestamp:
+    """'Expected back 8 Nov' → 2026-11-08. The news carries no year."""
+    m = _RETURN_DATE.search(news) if isinstance(news, str) else None
+    if not m:
+        return pd.NaT
+    date = pd.to_datetime(f"{m.group(1)} {captured_at.year}", format="%d %b %Y", utc=True)
+    if date < captured_at - pd.Timedelta(days=60):  # Dec snapshot, "back 3 Jan"
+        date += pd.DateOffset(years=1)
+    return date
+
+
+def availability(frame: pd.DataFrame) -> np.ndarray:
+    """P(available) for each row, from the snapshot it was built on.
+
+    A stated return date wins: out until then, available from then. Otherwise
+    the flag's chance applies in full to the first gameweek after the snapshot
+    and fades by RECOVERY_PER_WEEK after that. Rows without a snapshot (past
+    seasons) get 1.
+    """
+    if "status" not in frame or "captured_at" not in frame:
+        return np.ones(len(frame))
+    status = frame["status"].fillna("AVAILABLE")
+    chance = np.where(
+        status == "AVAILABLE", 1.0, frame["chance_next"].fillna(100).to_numpy() / 100.0
+    )
+    weeks = (
+        ((frame["deadline"] - frame["captured_at"]).dt.days // 7).fillna(0).clip(lower=0)
+    ).to_numpy()
+    rate = status.map(RECOVERY_PER_WEEK).fillna(1.0).to_numpy()
+    factor = 1.0 - (1.0 - chance) * rate**weeks
+
+    flagged = (status != "AVAILABLE").to_numpy()
+    if flagged.any() and "news" in frame:
+        sub = frame[flagged]
+        back = pd.Series(
+            [_return_date(n, c) for n, c in zip(sub["news"], sub["captured_at"])],
+            index=sub.index,
+            dtype="datetime64[ns, UTC]",
+        )
+        when = sub["kickoff_time"] if "kickoff_time" in sub else sub["deadline"]
+        dated = back.notna().to_numpy()
+        stated = np.where(when.to_numpy() >= back.to_numpy(), 1.0, chance[flagged])
+        factor[flagged] = np.where(dated, stated, factor[flagged])
+    return factor
+
 
 @dataclass
 class MinutesModel:
@@ -84,6 +142,10 @@ class MinutesModel:
     def predict(self, frame: pd.DataFrame) -> pd.DataFrame:
         X = frame[self.features].astype(float)
         proba = self.booster.predict_proba(X)
+        avail = availability(frame)
+        proba[:, 1] *= avail
+        proba[:, 2] *= avail
+        proba[:, 0] = 1.0 - proba[:, 1] - proba[:, 2]
 
         out = pd.DataFrame(index=frame.index)
         out["p_zero"] = proba[:, 0]
